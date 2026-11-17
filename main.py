@@ -1,4 +1,4 @@
-import os, threading
+import os, threading, asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -29,6 +29,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
     print("Bot started...")
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app.run_polling()
 
 if __name__ == "__main__":
