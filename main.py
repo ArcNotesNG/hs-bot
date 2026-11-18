@@ -10,6 +10,12 @@ DOCTOR_CHAT_ID = os.environ.get("DOCTOR_CHAT_ID")
 
 NAME, PHONE_STATE = range(2)
 
+EMERGENCY_WORDS = ["bleed", "bleeding", "blood", "chest pain", "can't breathe", "cannot breathe", "cant breathe", "difficulty breathing", "breathing problem", "unconscious", "fainted", "faint", "collapsed", "collapse", "accident", "stab", "stabbed", "broken", "fracture", "seizure", "convulsion", "choking", "choke", "poison", "suicide", "overdose", "burn", "electrocut", "drowning"]
+
+def is_emergency(text):
+    t = text.lower()
+    return any(w in t for w in EMERGENCY_WORDS)
+
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"Bot is alive")
@@ -73,14 +79,17 @@ async def forward_to_hospital(context, update, text, kind="MESSAGE"):
     clean = re.sub(r"[^\d+]", "", str(phone))
     if clean: btns.append([InlineKeyboardButton("📞 CALL PATIENT", url=f"tel:{clean}")])
     kb = InlineKeyboardMarkup(btns) if btns else None
-    msg = f"🆕 NEW PATIENT - {kind}\n\nName: {name}\nPhone: {phone}\nUsername: {username}\nUser ID: {user.id}\nMessage: {text}"
-    print(f"Forwarding to group={HOSPITAL_GROUP_ID} doctor={DOCTOR_CHAT_ID}", flush=True)
+    emergency = is_emergency(text)
+    title = "🚨 EMERGENCY - URGENT" if emergency else f"🆕 NEW PATIENT - {kind}"
+    msg = f"{title}\n\nName: {name}\nPhone: {phone}\nUsername: {username}\nUser ID: {user.id}\nMessage: {text}"
+    print(f"Forwarding to group={HOSPITAL_GROUP_ID} doctor={DOCTOR_CHAT_ID} emergency={emergency}", flush=True)
     if HOSPITAL_GROUP_ID:
         try: await context.bot.send_message(chat_id=int(HOSPITAL_GROUP_ID), text=msg, reply_markup=kb)
         except Exception as e: print(f"Group failed: {e}", flush=True)
     if DOCTOR_CHAT_ID:
         try: await context.bot.send_message(chat_id=int(DOCTOR_CHAT_ID), text=msg, reply_markup=kb)
         except Exception as e: print(f"Doctor failed: {e}", flush=True)
+    return emergency
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -91,8 +100,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await get_name(update, context)
     if not context.user_data.get("phone"):
         return await get_phone(update, context)
-    await forward_to_hospital(context, update, text, "MESSAGE")
-    await update.message.reply_text(f"Thank you, {context.user_data.get('name')} 🙏\n\nI have sent your message to the doctor. A doctor will reply you here soon.\n\nWhile you wait, rest and drink water. If it gets worse, call {PHONE}.", reply_markup=menu())
+    emergency = await forward_to_hospital(context, update, text, "MESSAGE")
+    name = context.user_data.get("name")
+    if emergency:
+        await update.message.reply_text(f"🚨 {name}, this sounds like an EMERGENCY.\n\nI have sent it to the doctor as URGENT.\n\nPlease CALL NOW: {PHONE}\nIf serious, go to the nearest hospital immediately. Do not wait for a chat reply.", reply_markup=menu())
+    else:
+        await update.message.reply_text(f"Thank you, {name} 🙏\n\nI have sent your message to the doctor. A doctor will reply you here soon.\n\nWhile you wait, rest and drink water. If it gets worse, call {PHONE}.", reply_markup=menu())
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("phone"):
