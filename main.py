@@ -147,4 +147,175 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def book_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    full = context
+    full = context.user_data.get("full", "there")
+    msg = f"{full}, to book an appointment, please send:\n\nWhat are you sick with?\n\nExample:\nFever and headache\n\nYou can also send a voice note or picture."
+    await update.message.reply_text(msg)
+
+async def doctor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    full = context.user_data.get("full", "there")
+    msg = f"{full}, to talk to a doctor, just send a voice note or type your problem here. We will forward it to the doctor.\n\nOr call us directly: {PHONE}"
+    await update.message.reply_text(msg)
+
+async def emergency_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = f"🚨 EMERGENCY:\n\nCall us NOW: {PHONE}\n\nIf it is serious, go to nearest hospital immediately."
+    await update.message.reply_text(msg)
+
+async def hours_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = """🕒 Opening Hours:
+
+Mon - Fri: 8am - 8pm
+Saturday: 9am - 5pm
+Sunday: Closed
+
+Emergency is open 24/7"""
+    await update.message.reply_text(msg)
+
+async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = """📍 Our Location:
+
+H&S Health Care, Lagos, Nigeria.
+
+Send us your area and we will send directions."""
+    await update.message.reply_text(msg)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = """❓ How to use this bot:
+
+1. Type /start to start
+2. Type your name and phone number once
+3. After that, you can:
+   - Type your problem
+   - Send a VOICE NOTE in any language
+   - Send a PICTURE of your wound
+
+Commands:
+/book - Book appointment
+/doctor - Talk to doctor
+/emergency - Emergency
+/hours - Opening hours
+/location - Location
+
+Just type / and choose from the menu!"""
+    await update.message.reply_text(msg, reply_markup=main_menu())
+
+async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+    full = context.user_data.get("full", "there")
+    if choice == "book":
+        msg = f"{full}, to book an appointment, please send:\n\nWhat are you sick with?\n\nExample:\nFever and headache\n\nYou can also send a voice note or picture."
+        await query.message.reply_text(msg)
+    elif choice == "doctor":
+        msg = f"{full}, to talk to a doctor, just send a voice note or type your problem here. We will forward it to the doctor.\n\nOr call us directly: {PHONE}"
+        await query.message.reply_text(msg)
+    elif choice == "hours":
+        msg = """🕒 Opening Hours:
+
+Mon - Fri: 8am - 8pm
+Saturday: 9am - 5pm
+Sunday: Closed
+
+Emergency is open 24/7"""
+        await query.message.reply_text(msg)
+    elif choice == "location":
+        msg = """📍 Our Location:
+
+H&S Health Care, Lagos, Nigeria.
+
+Send us your area and we will send directions."""
+        await query.message.reply_text(msg)
+    elif choice == "emergency":
+        msg = f"🚨 EMERGENCY:\n\nCall us NOW: {PHONE}\n\nIf it is serious, go to nearest hospital immediately."
+        await query.message.reply_text(msg)
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    full, phone, username_text, user_id = get_patient_info(update, context)
+    if not context.user_data.get("phone"):
+        await update.message.reply_text("Welcome! Before we continue, what is your name please?")
+        return NAME
+    await update.message.reply_text(f"Thank you, {full}. I have received your voice note. I am sending it to the doctor now. Please wait a little 🙏")
+    caption = f"🎤 NEW VOICE NOTE FROM PATIENT\n\nName: {full}\nUsername: {username_text}\nPhone: {phone}\nUser ID: {user_id}"
+    voice = update.message.voice
+    if HOSPITAL_GROUP_ID:
+        try:
+            await context.bot.send_voice(chat_id=HOSPITAL_GROUP_ID, voice=voice.file_id, caption=caption)
+        except Exception as e:
+            print(f"Group voice failed: {e}")
+    if DOCTOR_CHAT_ID:
+        try:
+            await context.bot.send_voice(chat_id=DOCTOR_CHAT_ID, voice=voice.file_id, caption=caption)
+        except Exception as e:
+            print(f"Doctor voice failed: {e}")
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    full, phone, username_text, user_id = get_patient_info(update, context)
+    if not context.user_data.get("phone"):
+        await update.message.reply_text("Welcome! Before we continue, what is your name please?")
+        return NAME
+    await update.message.reply_text(f"Thank you, {full}. I have received your picture. I am sending it to the hospital and doctor now. 📸")
+    caption_text = update.message.caption or "No description"
+    caption = f"🚨 NEW PATIENT PICTURE\n\nName: {full}\nUsername: {username_text}\nPhone: {phone}\nUser ID: {user_id}\nMessage: {caption_text}"
+    photo = update.message.photo[-1]
+    if HOSPITAL_GROUP_ID:
+        try:
+            await context.bot.send_photo(chat_id=HOSPITAL_GROUP_ID, photo=photo.file_id, caption=caption)
+        except Exception as e:
+            print(f"Group photo failed: {e}")
+    if DOCTOR_CHAT_ID:
+        try:
+            await context.bot.send_photo(chat_id=DOCTOR_CHAT_ID, photo=photo.file_id, caption=caption)
+        except Exception as e:
+            print(f"Doctor photo failed: {e}")
+
+async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    full = context.user_data.get("full", "there")
+    phone = context.user_data.get("phone", "Not saved yet")
+    if context.user_data.get("phone"):
+        full2, phone2, username_text, user_id = get_patient_info(update, context)
+        msg = f"💬 NEW MESSAGE FROM PATIENT\n\nName: {full2}\nUsername: {username_text}\nPhone: {phone2}\nMessage: {update.message.text}"
+        await send_to_hospital(context, msg)
+    msg2 = f"Thank you, {full}! We have received your message. Our team will contact you soon on {phone}.\n\nSend /start to see the menu again."
+    await update.message.reply_text(msg2, reply_markup=main_menu())
+
+async def set_bot_commands(app):
+    commands = [
+        BotCommand("start", "Start bot and get help"),
+        BotCommand("book", "Book appointment"),
+        BotCommand("doctor", "Talk to doctor"),
+        BotCommand("emergency", "Emergency number"),
+        BotCommand("hours", "Opening hours"),
+        BotCommand("location", "Hospital location"),
+        BotCommand("help", "How to use bot"),
+    ]
+    await app.bot.set_my_commands(commands)
+
+def main():
+    threading.Thread(target=keep_alive, daemon=True).start()
+    app = Application.builder().token(TOKEN).build()
+    app.post_init = set_bot_commands
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            TITLE: [CallbackQueryHandler(get_title, pattern="^title_")],
+            PHONE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
+        },
+        fallbacks=[],
+    )
+    app.add_handler(conv)
+    app.add_handler(CommandHandler("book", book_command))
+    app.add_handler(CommandHandler("doctor", doctor_command))
+    app.add_handler(CommandHandler("emergency", emergency_command))
+    app.add_handler(CommandHandler("hours", hours_command))
+    app.add_handler(CommandHandler("location", location_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(button_click))
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
+    print("Bot started...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
