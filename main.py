@@ -1,4 +1,4 @@
-import os, threading, re
+import os, threading, re, asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes, PicklePersistence
@@ -36,7 +36,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip().title()
-    # clean "my name is Samuel" -> "Samuel"
     name = re.sub(r"(?i)^(my name is|my name|i am|i'm|call me)\s+", "", name)
     context.user_data["name"] = name
     await update.message.reply_text(f"Nice to meet you, {name} 😊\n\nWhat is your phone number? Example: 08012345678")
@@ -69,12 +68,11 @@ async def forward_to_hospital(context, update, text, kind="MESSAGE"):
     user = update.effective_user
     username = f"@{user.username}" if user.username else "No username"
     link = f"https://t.me/{user.username}" if user.username else None
-    kb = None
     btns = []
     if link: btns.append([InlineKeyboardButton("💬 CHAT PATIENT NOW", url=link)])
     clean = re.sub(r"[^\d+]", "", str(phone))
     if clean: btns.append([InlineKeyboardButton("📞 CALL PATIENT", url=f"tel:{clean}")])
-    if btns: kb = InlineKeyboardMarkup(btns)
+    kb = InlineKeyboardMarkup(btns) if btns else None
     msg = f"🆕 NEW PATIENT - {kind}\n\nName: {name}\nPhone: {phone}\nUsername: {username}\nUser ID: {user.id}\nMessage: {text}"
     print(f"Forwarding to group={HOSPITAL_GROUP_ID} doctor={DOCTOR_CHAT_ID}", flush=True)
     if HOSPITAL_GROUP_ID:
@@ -86,16 +84,13 @@ async def forward_to_hospital(context, update, text, kind="MESSAGE"):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    # 1 - if no name yet, treat as name
     if not context.user_data.get("name"):
         if text.strip().lower() in ["hi","hello","hey","good morning","good afternoon"]:
             await update.message.reply_text("Hello! Welcome to H&S Health Care 🏥\n\nWhat is your name please?")
             return
         return await get_name(update, context)
-    # 2 - if no phone yet, treat as phone
     if not context.user_data.get("phone"):
         return await get_phone(update, context)
-    # 3 - already registered: FORWARD IMMEDIATELY
     await forward_to_hospital(context, update, text, "MESSAGE")
     await update.message.reply_text(f"Thank you, {context.user_data.get('name')} 🙏\n\nI have sent your message to the doctor. A doctor will reply you here soon.\n\nWhile you wait, rest and drink water. If it gets worse, call {PHONE}.", reply_markup=menu())
 
@@ -143,6 +138,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     print("Bot started...", flush=True)
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app.run_polling()
 
 if __name__ == "__main__":
