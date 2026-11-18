@@ -147,7 +147,6 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# --- NEW: COMMANDS FOR / MENU ---
 async def book_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full = context.user_data.get("full", "there")
     await update.message.reply_text(f"{full}, to book an appointment, please send:\n\nWhat are you sick with?\n\nExample:\nFever and headache\n\nYou can also send a voice note or picture.")
@@ -172,25 +171,4 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2. Type your name and phone number once\n"
         "3. After that, you can:\n"
         "   - Type your problem\n"
-        "   - Send a VOICE NOTE in any language (English, Pidgin, Yoruba, Igbo, Hausa)\n"
-        "   - Send a PICTURE of your wound\n\n"
-        "Commands:\n"
-        "/book - Book appointment\n"
-        "/doctor - Talk to doctor\n"
-        "/emergency - Emergency\n"
-        "/hours - Opening hours\n"
-        "/location - Location\n\n"
-        "Just type / and choose from the menu!",
-        reply_markup=main_menu()
-    )
-
-async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    choice = query.data
-    full = context.user_data.get("full", "there")
-    if choice == "book":
-        await query.message.reply_text(f"{full}, to book an appointment, please send:\n\nWhat are you sick with?\n\nExample:\nFever and headache\n\nYou can also send a voice note or picture.")
-    elif choice == "doctor":
-        await query.message.reply_text(f"{full}, to talk to a doctor, just send a voice note or type your problem here. We will forward it to the doctor.\n\nOr call us directly: {PHONE}")
-    elif choice ==
+        "   - Send a VOICE NOTE in any language\n
