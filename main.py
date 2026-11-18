@@ -1,4 +1,5 @@
-import os, threading, re, asyncio
+import os, threading, re, asyncio, json
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes, PicklePersistence
@@ -15,6 +16,47 @@ EMERGENCY_WORDS = ["bleed", "bleeding", "blood", "chest pain", "can't breathe", 
 def is_emergency(text):
     t = text.lower()
     return any(w in t for w in EMERGENCY_WORDS)
+
+# --- PATIENT NOTES ---
+PATIENTS_FILE = "patients.json"
+
+def load_patients():
+    try:
+        with open(PATIENTS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+def save_patient(user_id, name, phone, username, problem, kind="MESSAGE", day="", time=""):
+    patients = load_patients()
+    # If same patient already exists today, update last message instead of duplicating
+    today = datetime.now().strftime("%Y-%m-%d")
+    for p in patients:
+        if str(p.get("user_id")) == str(user_id) and p.get("date") == today and kind != "BOOKING":
+            p["last_message"] = problem[:100]
+            p["updated"] = datetime.now().strftime("%H:%M")
+            with open(PATIENTS_FILE, "w") as f:
+                json.dump(patients, f, indent=2)
+            return
+    patients.append({
+        "user_id": str(user_id),
+        "name": name,
+        "phone": phone,
+        "username": username,
+        "problem": problem[:200],
+        "type": kind,
+        "day": day,
+        "time": time,
+        "date": today,
+        "created": datetime.now().strftime("%H:%M"),
+        "updated": datetime.now().strftime("%H:%M"),
+        "status": "New"
+    })
+    with open(PATIENTS_FILE, "w") as f:
+        json.dump(patients, f, indent=2)
+
+def is_staff(chat_id):
+    return str(chat_id) in [str(HOSPITAL_GROUP_ID), str(DOCTOR_CHAT_ID)]
 
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -79,6 +121,7 @@ async def book_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = context.user_data.get("phone","")
     user = update.effective_user
     msg = f"📅 NEW BOOKING\n\nName: {name}\nPhone: {phone}\nUsername: @{user.username if user.username else 'No username'}\nUser ID: {user.id}\nProblem: {context.user_data.get('book_symptom')}\nDay: {context.user_data.get('book_day')}\nTime: {update.message.text}"
+    save_patient(user.id, name, phone, f"@{user.username}" if user.username else "No username", context.user_data.get('book_symptom',''), "BOOKING", context.user_data.get('book_day',''), update.message.text)
     if HOSPITAL_GROUP_ID:
         try: await context.bot.send_message(chat_id=int(HOSPITAL_GROUP_ID), text=msg)
         except Exception as e: print(e)
@@ -117,6 +160,7 @@ async def forward_to_hospital(context, update, text, kind="MESSAGE"):
     emergency = is_emergency(text)
     title = "🚨 EMERGENCY - URGENT" if emergency else f"🆕 NEW PATIENT - {kind}"
     msg = f"{title}\n\nName: {name}\nPhone: {phone}\nUsername: {username}\nUser ID: {user.id}\nMessage: {text}\n\n--- To reply, type: /reply {user.id} your message"
+    save_patient(user.id, name, phone, username, text, kind)
     if HOSPITAL_GROUP_ID:
         try: await context.bot.send_message(chat_id=int(HOSPITAL_GROUP_ID), text=msg, reply_markup=kb)
         except Exception as e: print(f"Group failed: {e}")
@@ -126,8 +170,7 @@ async def forward_to_hospital(context, update, text, kind="MESSAGE"):
     return emergency
 
 async def reply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Only works in Hospital Group / Doctor chat
-    if str(update.effective_chat.id) not in [str(HOSPITAL_GROUP_ID), str(DOCTOR_CHAT_ID)]:
+    if not is_staff(update.effective_chat.id):
         return
     if len(context.args) < 2:
         await update.message.reply_text("Use: /reply USER_ID your message")
@@ -140,9 +183,61 @@ async def reply_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Failed: {e}")
 
+async def patients_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_staff(update.effective_chat.id):
+        return
+    patients = load_patients()
+    if not patients:
+        await update.message.reply_text("No patients yet.")
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    todays = [p for p in patients if p.get("date") == today]
+    show = todays if todays else patients[-15:]
+    title = f"📋 PATIENTS TODAY ({len(todays)}):\n\n" if todays else "📋 LAST PATIENTS:\n\n"
+    text = title
+    for p in show[-15:]:
+        text += f"{p.get('status')} | {p.get('name')} | {p.get('phone')}\nProblem: {p.get('problem')}\nID: {p.get('user_id')} | {p.get('created')}\n---\n"
+    text += "\nTo mark done: /done USER_ID\nTo search: /find name"
+    await update.message.reply_text(text)
+
+async def done_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_staff(update.effective_chat.id):
+        return
+    if not context.args:
+        await update.message.reply_text("Use: /done USER_ID")
+        return
+    patients = load_patients()
+    found = False
+    for p in patients:
+        if str(p.get("user_id")) == str(context.args[0]):
+            p["status"] = "Done"
+            found = True
+    if found:
+        with open(PATIENTS_FILE, "w") as f:
+            json.dump(patients, f, indent=2)
+        await update.message.reply_text("✅ Patient marked as Done.")
+    else:
+        await update.message.reply_text("Patient not found. Check ID with /patients")
+
+async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_staff(update.effective_chat.id):
+        return
+    if not context.args:
+        await update.message.reply_text("Use: /find John or /find 080123...")
+        return
+    q = " ".join(context.args).lower()
+    patients = load_patients()
+    results = [p for p in patients if q in str(p.get("name","")).lower() or q in str(p.get("phone",""))]
+    if not results:
+        await update.message.reply_text("No patient found.")
+        return
+    text = f"🔍 Found {len(results)}:\n\n"
+    for p in results[-10:]:
+        text += f"{p.get('status')} | {p.get('name')} | {p.get('phone')}\n{p.get('date')} {p.get('created')} | {p.get('problem')}\nID: {p.get('user_id')}\n---\n"
+    await update.message.reply_text(text)
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    # Booking flow check
     if context.user_data.get("booking"):
         if "book_symptom" not in context.user_data:
             context.user_data["book_symptom"] = text
@@ -152,13 +247,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["book_day"] = text
             await update.message.reply_text("What time? Example: 10am, 2pm")
             return
-        # finish booking
         day = context.user_data.pop("book_day")
         symptom = context.user_data.pop("book_symptom")
         context.user_data.pop("booking", None)
         name = context.user_data.get("name","Patient"); phone = context.user_data.get("phone","")
         user = update.effective_user
         msg = f"📅 NEW BOOKING\n\nName: {name}\nPhone: {phone}\nUser ID: {user.id}\nProblem: {symptom}\nDay: {day}\nTime: {text}"
+        save_patient(user.id, name, phone, f"@{user.username}" if user.username else "No username", symptom, "BOOKING", day, text)
         if HOSPITAL_GROUP_ID:
             try: await context.bot.send_message(chat_id=int(HOSPITAL_GROUP_ID), text=msg)
             except: pass
@@ -183,6 +278,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Welcome! What is your name please?"); return
     name = context.user_data.get("name"); phone = context.user_data.get("phone"); user = update.effective_user
     caption = f"🎤 NEW VOICE NOTE\n\nName: {name}\nPhone: {phone}\nUsername: @{user.username if user.username else 'No username'}\nUser ID: {user.id}\n\nTo reply: /reply {user.id} your message"
+    save_patient(user.id, name, phone, f"@{user.username}" if user.username else "No username", "Voice note", "VOICE")
     if HOSPITAL_GROUP_ID:
         try: await context.bot.send_voice(chat_id=int(HOSPITAL_GROUP_ID), voice=update.message.voice.file_id, caption=caption)
         except: pass
@@ -196,6 +292,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Welcome! What is your name please?"); return
     name = context.user_data.get("name"); phone = context.user_data.get("phone"); user = update.effective_user
     caption = f"📸 NEW PICTURE\n\nName: {name}\nPhone: {phone}\nUsername: @{user.username if user.username else 'No username'}\nUser ID: {user.id}\nMessage: {update.message.caption or ''}\n\nTo reply: /reply {user.id} your message"
+    save_patient(user.id, name, phone, f"@{user.username}" if user.username else "No username", update.message.caption or "Picture", "PHOTO")
     if HOSPITAL_GROUP_ID:
         try: await context.bot.send_photo(chat_id=int(HOSPITAL_GROUP_ID), photo=update.message.photo[-1].file_id, caption=caption)
         except: pass
@@ -205,7 +302,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Thank you, {name} 🙏 Picture sent to doctor. Doctor will reply you here soon.")
 
 async def set_cmd(app):
-    await app.bot.set_my_commands([BotCommand("start","Start"),BotCommand("menu","Show menu"),BotCommand("book","Book appointment"),BotCommand("doctor","Talk to doctor"),BotCommand("emergency","Emergency"),BotCommand("hours","Opening hours"),BotCommand("location","Location"),BotCommand("reply","Doctor reply")])
+    await app.bot.set_my_commands([BotCommand("start","Start"),BotCommand("menu","Show menu"),BotCommand("book","Book appointment"),BotCommand("doctor","Talk to doctor"),BotCommand("emergency","Emergency"),BotCommand("hours","Opening hours"),BotCommand("location","Location"),BotCommand("reply","Doctor reply"),BotCommand("patients","See patients"),BotCommand("done","Mark patient done"),BotCommand("find","Search patient")])
 
 def main():
     threading.Thread(target=keep_alive, daemon=True).start()
@@ -216,6 +313,9 @@ def main():
     app.add_handler(CommandHandler("menu", show_menu))
     app.add_handler(CommandHandler("reply", reply_cmd))
     app.add_handler(CommandHandler("book", book_cmd))
+    app.add_handler(CommandHandler("patients", patients_cmd))
+    app.add_handler(CommandHandler("done", done_cmd))
+    app.add_handler(CommandHandler("find", find_cmd))
     app.add_handler(CallbackQueryHandler(button))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
