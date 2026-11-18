@@ -5,10 +5,13 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 
 TOKEN = os.environ.get("BOT_TOKEN")
 PHONE = "+2348076446822"
+HOSPITAL_GROUP_ID = os.environ.get("HOSPITAL_GROUP_ID")  # e.g. -1001234567890
+DOCTOR_CHAT_ID = os.environ.get("DOCTOR_CHAT_ID")  # e.g. 123456789
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")  # optional, for voice transcription
 
-NAME, TITLE = range(2)
+NAME, TITLE, PHONE_STATE = range(3)
 
-# --- NAME LISTS - Bot uses this to guess Mr / Mrs ---
+# --- NAME LISTS ---
 MALE_NAMES = {
     "samuel", "john", "michael", "david", "daniel", "joseph", "emmanuel", "chinedu", "chidi",
     "emeka", "obinna", "oluwaseun", "tunde", "segun", "ade", "adebayo", "kunle", "femi", "bayo",
@@ -80,7 +83,33 @@ def guess_title(name):
         return "Mrs"
     return None
 
+def get_patient_info(update, context):
+    full = context.user_data.get("full", "Patient")
+    phone = context.user_data.get("phone", "Not provided")
+    username = update.effective_user.username
+    username_text = f"@{username}" if username else "No username"
+    user_id = update.effective_user.id
+    return full, phone, username_text, user_id
+
+async def send_to_hospital(context, text):
+    # Send to group and doctor
+    if HOSPITAL_GROUP_ID:
+        try:
+            await context.bot.send_message(chat_id=HOSPITAL_GROUP_ID, text=text)
+        except Exception as e:
+            print(f"Group send failed: {e}")
+    if DOCTOR_CHAT_ID:
+        try:
+            await context.bot.send_message(chat_id=DOCTOR_CHAT_ID, text=text)
+        except Exception as e:
+            print(f"Doctor send failed: {e}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # If already registered, skip to menu
+    if context.user_data.get("phone"):
+        full = context.user_data.get("full", "there")
+        await update.message.reply_text(f"Welcome back, {full} 😊\n\nHow can we help you today? Choose one:", reply_markup=main_menu())
+        return ConversationHandler.END
     await update.message.reply_text("Welcome to H&S Health Care 🏥\n\nWhat is your name please?")
     return NAME
 
@@ -88,22 +117,12 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = clean_name(update.message.text)
     context.user_data["name"] = name
     title = guess_title(name)
-
-    # If bot knows the name, auto assign Mr/Mrs
     if title:
         context.user_data["title"] = title
         context.user_data["full"] = f"{title} {name}"
-        await update.message.reply_text(
-            f"Nice to meet you, {title} {name} 😊\n\nWelcome to H&S Health Care 🏥\n\nHow can we help you today? Choose one:",
-            reply_markup=main_menu()
-        )
-        return ConversationHandler.END
-
-    # If bot doesn't know, ask
-    await update.message.reply_text(
-        f"Nice to meet you, {name} 😊\n\nHow should I address you?",
-        reply_markup=title_menu()
-    )
+        await update.message.reply_text(f"Nice to meet you, {title} {name} 😊\n\nWhat is your phone number so the doctor can call you back? Example: 08012345678")
+        return PHONE_STATE
+    await update.message.reply_text(f"Nice to meet you, {name} 😊\n\nHow should I address you?", reply_markup=title_menu())
     return TITLE
 
 async def get_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -113,8 +132,21 @@ async def get_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = context.user_data.get("name", "")
     context.user_data["title"] = title
     context.user_data["full"] = f"{title} {name}"
-    await query.message.reply_text(
-        f"Thank you, {title} {name}! Welcome to H&S Health Care 🏥\n\nHow can we help you today? Choose one:",
+    await query.edit_message_text(f"Thank you, {title} {name}!")
+    await query.message.reply_text("What is your phone number so the doctor can call you back? Example: 08012345678")
+    return PHONE_STATE
+
+async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    # Extract phone number - allow 080..., +234..., 234...
+    digits = re.sub(r"[^\d+]", "", text)
+    if len(digits) < 10:
+        await update.message.reply_text("Sorry, that phone number looks too short. Please type it again, e.g. 08012345678")
+        return PHONE_STATE
+    context.user_data["phone"] = digits
+    full = context.user_data.get("full", "")
+    await update.message.reply_text(
+        f"Thank you, {full}! I have saved your phone number: {digits} ✅\n\nYou will not need to type it again.\n\nNow, how can we help you today? You can type, send a voice note, or send a picture of your wound.",
         reply_markup=main_menu()
     )
     return ConversationHandler.END
@@ -125,9 +157,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = query.data
     full = context.user_data.get("full", "there")
     if choice == "book":
-        await query.message.reply_text(f"{full}, to book an appointment, please send:\n\n1. Your Phone Number\n2. What are you sick with?\n\nExample:\n08012345678\nFever and headache")
+        await query.message.reply_text(f"{full}, to book an appointment, please send:\n\nWhat are you sick with?\n\nExample:\nFever and headache\n\nYou can also send a voice note or picture.")
     elif choice == "doctor":
-        await query.message.reply_text(f"{full}, to talk to a doctor, please send your phone number and we will call you back.\n\nOr call us directly: {PHONE}")
+        await query.message.reply_text(f"{full}, to talk to a doctor, just send a voice note or type your problem here. We will forward it to the doctor.\n\nOr call us directly: {PHONE}")
     elif choice == "hours":
         await query.message.reply_text("🕒 Opening Hours:\n\nMon - Fri: 8am - 8pm\nSaturday: 9am - 5pm\nSunday: Closed\n\nEmergency is open 24/7")
     elif choice == "location":
@@ -135,10 +167,113 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif choice == "emergency":
         await query.message.reply_text(f"🚨 EMERGENCY:\n\nCall us NOW: {PHONE}\n\nIf it is serious, go to nearest hospital immediately.")
 
+# --- NEW: VOICE NOTE HANDLER ---
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    full, phone, username_text, user_id = get_patient_info(update, context)
+    # If no phone yet, ask for it first
+    if not context.user_data.get("phone"):
+        await update.message.reply_text("Welcome! Before we continue, what is your name please?")
+        return NAME
+
+    await update.message.reply_text(f"Thank you, {full}. I have received your voice note. I am sending it to the doctor now. Please wait a little 🙏\n\nIf your voice was not clear, please send it again slowly.")
+
+    caption = (
+        f"🎤 NEW VOICE NOTE FROM PATIENT\n\n"
+        f"Name: {full}\n"
+        f"Telegram Username: {username_text}\n"
+        f"Phone Number: {phone}\n"
+        f"User ID: {user_id}\n\n"
+        f"Please listen and reply. Patient speaks any language - English, Pidgin, Yoruba, Igbo, Hausa."
+    )
+
+    # Forward voice to hospital group + doctor
+    voice = update.message.voice
+    if HOSPITAL_GROUP_ID:
+        try:
+            await context.bot.send_voice(chat_id=HOSPITAL_GROUP_ID, voice=voice.file_id, caption=caption)
+        except Exception as e:
+            print(f"Group voice failed: {e}")
+            await context.bot.send_message(chat_id=HOSPITAL_GROUP_ID, text=caption)
+            await context.bot.forward_message(chat_id=HOSPITAL_GROUP_ID, from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+    if DOCTOR_CHAT_ID:
+        try:
+            await context.bot.send_voice(chat_id=DOCTOR_CHAT_ID, voice=voice.file_id, caption=caption)
+        except Exception as e:
+            print(f"Doctor voice failed: {e}")
+            await context.bot.send_message(chat_id=DOCTOR_CHAT_ID, text=caption)
+            await context.bot.forward_message(chat_id=DOCTOR_CHAT_ID, from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+
+    # Try transcription if OpenAI key exists (understands many languages, even weak voice)
+    if OPENAI_API_KEY:
+        try:
+            import tempfile, requests
+            file = await context.bot.get_file(voice.file_id)
+            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tf:
+                await file.download_to_drive(tf.name)
+                audio_path = tf.name
+            with open(audio_path, "rb") as f:
+                r = requests.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+                    files={"file": f},
+                    data={"model": "whisper-1"},
+                    timeout=60
+                )
+            if r.status_code == 200:
+                text_transcribed = r.json().get("text", "")
+                if text_transcribed:
+                    trans_msg = f"📝 Transcription (auto-detected language):\n{text_transcribed}\n\nPatient: {full} | Phone: {phone}"
+                    await send_to_hospital(context, trans_msg)
+                    await update.message.reply_text(f"I heard you say: \"{text_transcribed}\"\n\nIs that correct? If not, please send again slowly.")
+                else:
+                    await update.message.reply_text("Sorry, I could not hear you well. Can you please speak again slowly and a little louder?")
+            else:
+                await update.message.reply_text("Sorry mama/papa, I did not hear you well. Can you please speak again slowly?")
+        except Exception as e:
+            print(f"Transcription failed: {e}")
+            await update.message.reply_text("I have sent your voice to the doctor. If it was not clear, please send again slowly.")
+
+# --- NEW: PHOTO HANDLER ---
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    full, phone, username_text, user_id = get_patient_info(update, context)
+    if not context.user_data.get("phone"):
+        await update.message.reply_text("Welcome! Before we continue, what is your name please?")
+        return NAME
+
+    await update.message.reply_text(f"Thank you, {full}. I have received your picture. I am sending it to the hospital and doctor now. 📸")
+
+    caption_text = update.message.caption or "No description"
+    caption = (
+        f"🚨 NEW PATIENT PICTURE\n\n"
+        f"Name: {full}\n"
+        f"Telegram Username: {username_text}\n"
+        f"Phone Number: {phone}\n"
+        f"User ID: {user_id}\n"
+        f"Patient Message: {caption_text}\n\n"
+        f"Please check and call patient."
+    )
+    photo = update.message.photo[-1]  # highest quality
+    if HOSPITAL_GROUP_ID:
+        try:
+            await context.bot.send_photo(chat_id=HOSPITAL_GROUP_ID, photo=photo.file_id, caption=caption)
+        except Exception as e:
+            print(f"Group photo failed: {e}")
+    if DOCTOR_CHAT_ID:
+        try:
+            await context.bot.send_photo(chat_id=DOCTOR_CHAT_ID, photo=photo.file_id, caption=caption)
+        except Exception as e:
+            print(f"Doctor photo failed: {e}")
+
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full = context.user_data.get("full", "there")
+    phone = context.user_data.get("phone", "Not saved yet")
+    # Forward text message to hospital too
+    if context.user_data.get("phone"):
+        full2, phone2, username_text, user_id = get_patient_info(update, context)
+        msg = f"💬 NEW MESSAGE FROM PATIENT\n\nName: {full2}\nUsername: {username_text}\nPhone: {phone2}\nMessage: {update.message.text}"
+        await send_to_hospital(context, msg)
     await update.message.reply_text(
-        f"Thank you, {full}! We have received your message. Our team will contact you soon.\n\nSend /start to see the menu again.",
+        f"Thank you, {full}! We have received your message. Our team will contact you soon on {phone}.\n\nSend /start to see the menu again.",
         reply_markup=main_menu()
     )
 
@@ -150,11 +285,15 @@ def main():
         states={
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             TITLE: [CallbackQueryHandler(get_title, pattern="^title_")],
+            PHONE_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)],
         },
         fallbacks=[],
     )
     app.add_handler(conv)
     app.add_handler(CallbackQueryHandler(button_click))
+    # Voice and Photo must come BEFORE text handler
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
     print("Bot started...")
     asyncio.set_event_loop(asyncio.new_event_loop())
