@@ -105,7 +105,8 @@ async def send_to_hospital(context, text):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("phone"):
         full = context.user_data.get("full", "there")
-        await update.message.reply_text(f"Welcome back, {full} 😊\n\nHow can we help you today? Choose one:", reply_markup=main_menu())
+        text = f"Welcome back, {full} 😊\n\nHow can we help you today? Choose one:"
+        await update.message.reply_text(text, reply_markup=main_menu())
         return ConversationHandler.END
     await update.message.reply_text("Welcome to H&S Health Care 🏥\n\nWhat is your name please?")
     return NAME
@@ -141,34 +142,9 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return PHONE_STATE
     context.user_data["phone"] = digits
     full = context.user_data.get("full", "")
-    await update.message.reply_text(
-        f"Thank you, {full}! I have saved your phone number: {digits} ✅\n\nYou will not need to type it again.\n\nNow, how can we help you today? You can type, send a voice note, or send a picture of your wound.",
-        reply_markup=main_menu()
-    )
+    msg = f"Thank you, {full}! I have saved your phone number: {digits} ✅\n\nYou will not need to type it again.\n\nNow, how can we help you today? You can type, send a voice note, or send a picture of your wound."
+    await update.message.reply_text(msg, reply_markup=main_menu())
     return ConversationHandler.END
 
 async def book_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    full = context.user_data.get("full", "there")
-    await update.message.reply_text(f"{full}, to book an appointment, please send:\n\nWhat are you sick with?\n\nExample:\nFever and headache\n\nYou can also send a voice note or picture.")
-
-async def doctor_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    full = context.user_data.get("full", "there")
-    await update.message.reply_text(f"{full}, to talk to a doctor, just send a voice note or type your problem here. We will forward it to the doctor.\n\nOr call us directly: {PHONE}")
-
-async def emergency_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"🚨 EMERGENCY:\n\nCall us NOW: {PHONE}\n\nIf it is serious, go to nearest hospital immediately.")
-
-async def hours_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🕒 Opening Hours:\n\nMon - Fri: 8am - 8pm\nSaturday: 9am - 5pm\nSunday: Closed\n\nEmergency is open 24/7")
-
-async def location_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📍 Our Location:\n\nH&S Health Care, Lagos, Nigeria.\n\nSend us your area and we will send directions.")
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "❓ How to use this bot:\n\n"
-        "1. Type /start to start\n"
-        "2. Type your name and phone number once\n"
-        "3. After that, you can:\n"
-        "   - Type your problem\n"
-        "   - Send a VOICE NOTE in any language\n
+    full = context
