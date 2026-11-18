@@ -91,37 +91,39 @@ def get_patient_info(update, context):
     return full, phone, username_text, user_id
 
 def build_patient_chat(update):
-    # Returns clickable HTML link + chat_url + keyboard for staff to chat patient directly
     username = update.effective_user.username
     user_id = update.effective_user.id
-    phone = update.effective_user and None
     if username:
         chat_url = f"https://t.me/{username}"
-        link_html = f'<a href="{chat_url}">@{username} - TAP TO CHAT PATIENT</a>'
+        link_text = f"@{username}\nChat Link: {chat_url}"
     else:
-        chat_url = f"tg://user?id={user_id}"
-        link_html = f'<a href="{chat_url}">TAP TO CHAT PATIENT (No Username)</a>'
-    return link_html, chat_url
+        chat_url = None
+        link_text = f"No username - User ID: {user_id} (Ask patient to set username in Settings)"
+    return link_text, chat_url
 
 def build_patient_keyboard(chat_url, phone):
-    buttons = [[InlineKeyboardButton("💬 CHAT PATIENT NOW", url=chat_url)]]
+    buttons = []
+    if chat_url:
+        buttons.append([InlineKeyboardButton("💬 CHAT PATIENT NOW", url=chat_url)])
     if phone and phone != "Not provided" and phone != "Not saved yet":
         clean_phone = re.sub(r"[^\d+]", "", str(phone))
         if clean_phone:
             buttons.append([InlineKeyboardButton("📞 CALL PATIENT", url=f"tel:{clean_phone}")])
+    if not buttons:
+        return None
     return InlineKeyboardMarkup(buttons)
 
 async def send_to_hospital(context, text, reply_markup=None):
     if HOSPITAL_GROUP_ID:
         try:
-            await context.bot.send_message(chat_id=HOSPITAL_GROUP_ID, text=text, parse_mode="HTML", reply_markup=reply_markup)
+            await context.bot.send_message(chat_id=HOSPITAL_GROUP_ID, text=text, reply_markup=reply_markup)
         except Exception as e:
-            print(f"Group send failed: {e}")
+            print(f"Group send failed: {e}", flush=True)
     if DOCTOR_CHAT_ID:
         try:
-            await context.bot.send_message(chat_id=DOCTOR_CHAT_ID, text=text, parse_mode="HTML", reply_markup=reply_markup)
+            await context.bot.send_message(chat_id=DOCTOR_CHAT_ID, text=text, reply_markup=reply_markup)
         except Exception as e:
-            print(f"Doctor send failed: {e}")
+            print(f"Doctor send failed: {e}", flush=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("phone"):
@@ -256,20 +258,20 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Welcome! Before we continue, what is your name please?")
         return NAME
     await update.message.reply_text(f"Thank you, {full}. I have received your voice note. I am sending it to the doctor now. Please wait a little 🙏")
-    link_html, chat_url = build_patient_chat(update)
+    link_text, chat_url = build_patient_chat(update)
     keyboard = build_patient_keyboard(chat_url, phone)
-    caption = f"🎤 NEW VOICE NOTE FROM PATIENT\n\nName: {full}\nUsername: {username_text}\nPatient: {link_html}\nPhone: {phone}\nUser ID: {user_id}\n\n👆 Tap CHAT PATIENT NOW below to reply directly"
+    caption = f"🎤 NEW VOICE NOTE FROM PATIENT\n\nName: {full}\nUsername: {username_text}\nPatient: {link_text}\nPhone: {phone}\nUser ID: {user_id}\n\nTap CHAT PATIENT NOW below to reply directly"
     voice = update.message.voice
     if HOSPITAL_GROUP_ID:
         try:
-            await context.bot.send_voice(chat_id=HOSPITAL_GROUP_ID, voice=voice.file_id, caption=caption, parse_mode="HTML", reply_markup=keyboard)
+            await context.bot.send_voice(chat_id=HOSPITAL_GROUP_ID, voice=voice.file_id, caption=caption, reply_markup=keyboard)
         except Exception as e:
-            print(f"Group voice failed: {e}")
+            print(f"Group voice failed: {e}", flush=True)
     if DOCTOR_CHAT_ID:
         try:
-            await context.bot.send_voice(chat_id=DOCTOR_CHAT_ID, voice=voice.file_id, caption=caption, parse_mode="HTML", reply_markup=keyboard)
+            await context.bot.send_voice(chat_id=DOCTOR_CHAT_ID, voice=voice.file_id, caption=caption, reply_markup=keyboard)
         except Exception as e:
-            print(f"Doctor voice failed: {e}")
+            print(f"Doctor voice failed: {e}", flush=True)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full, phone, username_text, user_id = get_patient_info(update, context)
@@ -278,29 +280,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return NAME
     await update.message.reply_text(f"Thank you, {full}. I have received your picture. I am sending it to the hospital and doctor now. 📸")
     caption_text = update.message.caption or "No description"
-    link_html, chat_url = build_patient_chat(update)
+    link_text, chat_url = build_patient_chat(update)
     keyboard = build_patient_keyboard(chat_url, phone)
-    caption = f"🚨 NEW PATIENT PICTURE\n\nName: {full}\nUsername: {username_text}\nPatient: {link_html}\nPhone: {phone}\nUser ID: {user_id}\nMessage: {caption_text}\n\n👆 Tap CHAT PATIENT NOW below to reply directly"
+    caption = f"🚨 NEW PATIENT PICTURE\n\nName: {full}\nUsername: {username_text}\nPatient: {link_text}\nPhone: {phone}\nUser ID: {user_id}\nMessage: {caption_text}\n\nTap CHAT PATIENT NOW below to reply directly"
     photo = update.message.photo[-1]
     if HOSPITAL_GROUP_ID:
         try:
-            await context.bot.send_photo(chat_id=HOSPITAL_GROUP_ID, photo=photo.file_id, caption=caption, parse_mode="HTML", reply_markup=keyboard)
+            await context.bot.send_photo(chat_id=HOSPITAL_GROUP_ID, photo=photo.file_id, caption=caption, reply_markup=keyboard)
         except Exception as e:
-            print(f"Group photo failed: {e}")
+            print(f"Group photo failed: {e}", flush=True)
     if DOCTOR_CHAT_ID:
         try:
-            await context.bot.send_photo(chat_id=DOCTOR_CHAT_ID, photo=photo.file_id, caption=caption, parse_mode="HTML", reply_markup=keyboard)
+            await context.bot.send_photo(chat_id=DOCTOR_CHAT_ID, photo=photo.file_id, caption=caption, reply_markup=keyboard)
         except Exception as e:
-            print(f"Doctor photo failed: {e}")
+            print(f"Doctor photo failed: {e}", flush=True)
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full = context.user_data.get("full", "there")
     phone = context.user_data.get("phone", "Not saved yet")
     if context.user_data.get("phone"):
         full2, phone2, username_text, user_id = get_patient_info(update, context)
-        link_html, chat_url = build_patient_chat(update)
+        link_text, chat_url = build_patient_chat(update)
         keyboard = build_patient_keyboard(chat_url, phone2)
-        msg = f"💬 <b>NEW MESSAGE FROM PATIENT</b>\n\nName: {full2}\nUsername: {username_text}\nPatient: {link_html}\nPhone: {phone2}\nUser ID: {user_id}\nMessage: {update.message.text}\n\n👆 Tap CHAT PATIENT NOW below to reply directly"
+        msg = f"💬 NEW MESSAGE FROM PATIENT\n\nName: {full2}\nUsername: {username_text}\nPatient: {link_text}\nPhone: {phone2}\nUser ID: {user_id}\nMessage: {update.message.text}\n\nTap CHAT PATIENT NOW below to reply directly"
         await send_to_hospital(context, msg, reply_markup=keyboard)
     msg2 = f"Thank you, {full}! We have received your message. Our team will contact you soon on {phone}.\n\nSend /start to see the menu again."
     await update.message.reply_text(msg2, reply_markup=main_menu())
@@ -341,7 +343,7 @@ def main():
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
-    print("Bot started...")
+    print("Bot started...", flush=True)
     asyncio.set_event_loop(asyncio.new_event_loop())
     app.run_polling()
 
