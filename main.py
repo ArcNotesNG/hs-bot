@@ -1,11 +1,12 @@
 import os, threading, asyncio, re, json, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ConversationHandler, filters, ContextTypes, PicklePersistence
 
 TOKEN = os.environ.get("BOT_TOKEN")
 PHONE = "+2348076446822"
-HOSPITAL_GROUP_ID = os.environ.get("HOSPITAL_GROUP_ID")
+# FIX 1: accept EITHER name, so it always finds the group
+HOSPITAL_GROUP_ID = os.environ.get("HOSPITAL_GROUP_ID") or os.environ.get("GROUP_ID")
 DOCTOR_CHAT_ID = os.environ.get("DOCTOR_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
@@ -75,6 +76,7 @@ def build_patient_keyboard(chat_url, phone):
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 async def send_to_hospital(context, text, reply_markup=None):
+    print(f"Sending to group={HOSPITAL_GROUP_ID} doctor={DOCTOR_CHAT_ID}", flush=True)
     if HOSPITAL_GROUP_ID:
         try: await context.bot.send_message(chat_id=HOSPITAL_GROUP_ID, text=text, reply_markup=reply_markup)
         except Exception as e: print(f"Group send failed: {e}", flush=True)
@@ -96,8 +98,9 @@ Conversation so far:
             prompt += f"{role}: {h['content']}\n"
         prompt += f"Patient: {user_text}\nNurse:"
         data = json.dumps({"contents":[{"parts":[{"text": prompt}]}]}).encode()
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
-        req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"})
+        # FIX 2: AQ keys must go in header, not URL
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json", "x-goog-api-key": GEMINI_API_KEY})
         with urllib.request.urlopen(req, timeout=20) as r:
             res = json.loads(r.read().decode())
             return res["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -177,7 +180,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full, phone, username_text, user_id = get_patient_info(update, context)
     if not context.user_data.get("phone"):
         await update.message.reply_text("Welcome! Before we continue, what is your name please?")
-        return NAME
+        return
     await update.message.reply_text(f"Thank you, {full}, I heard your voice note 🙏 I have sent it to the doctor now.\n\nHow are you feeling now? Are you in pain? Can you tell me more about what you are feeling? I'm listening, you can send another voice note.")
     link_text, chat_url = build_patient_chat(update)
     keyboard = build_patient_keyboard(chat_url, phone)
@@ -194,7 +197,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full, phone, username_text, user_id = get_patient_info(update, context)
     if not context.user_data.get("phone"):
         await update.message.reply_text("Welcome! Before we continue, what is your name please?")
-        return NAME
+        return
     await update.message.reply_text(f"Thank you, {full}, I have seen your picture 📸 I have sent it to the doctor now.\n\nHow are you feeling now? Is the pain getting worse? When did it start? Please tell me more, I'm here to help you.")
     caption_text = update.message.caption or "No description"
     link_text, chat_url = build_patient_chat(update)
@@ -210,12 +213,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    if not context.user_data.get("phone"):
+    # FIX 3: If not registered, handle name/phone HERE - don't loop
+    if not context.user_data.get("name"):
+        # Treat this message as the name, unless it's just hello
         if text.strip().lower() in ["hello","hi","hey","good morning","good afternoon","good evening","hello o","hi o"]:
             await update.message.reply_text("Hello! Welcome to H&S Health Care 🏥😊\n\nHow are you feeling today? What is your name please?")
-            return NAME
-        await update.message.reply_text("Welcome to H&S Health Care 🏥\n\nWhat is your name please?")
-        return NAME
+            return
+        # Actually save the name now
+        return await get_name(update, context)
+    if not context.user_data.get("phone"):
+        # Treat this message as phone number
+        return await get_phone(update, context)
+
     full = context.user_data.get("full", "there")
     full2, phone2, username_text, user_id = get_patient_info(update, context)
     link_text, chat_url = build_patient_chat(update)
@@ -238,9 +247,10 @@ async def set_bot_commands(app):
 
 def main():
     threading.Thread(target=keep_alive, daemon=True).start()
-    app = Application.builder().token(TOKEN).build()
+    persistence = PicklePersistence(filepath="bot_data.pkl")
+    app = Application.builder().token(TOKEN).persistence(persistence).build()
     app.post_init = set_bot_commands
-    conv = ConversationHandler(entry_points=[CommandHandler("start", start)], states={NAME:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)], TITLE:[CallbackQueryHandler(get_title, pattern="^title_")], PHONE_STATE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)]}, fallbacks=[])
+    conv = ConversationHandler(entry_points=[CommandHandler("start", start)], states={NAME:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)], TITLE:[CallbackQueryHandler(get_title, pattern="^title_")], PHONE_STATE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_phone)]}, fallbacks=[], persistent=True, name="hs_conv")
     app.add_handler(conv)
     app.add_handler(CommandHandler("book", book_command))
     app.add_handler(CommandHandler("doctor", doctor_command))
