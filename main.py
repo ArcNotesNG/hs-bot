@@ -128,7 +128,7 @@ async def send_to_hospital(context, text, reply_markup=None):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("phone"):
         full = context.user_data.get("full", "there")
-        text = f"Welcome back, {full} 😊\n\nHow can we help you today? Choose one:"
+        text = f"Welcome back, {full} 😊\n\nHow are you feeling today? How can we help you?"
         await update.message.reply_text(text, reply_markup=main_menu())
         return ConversationHandler.END
     await update.message.reply_text("Welcome to H&S Health Care 🏥\n\nWhat is your name please?")
@@ -165,7 +165,7 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return PHONE_STATE
     context.user_data["phone"] = digits
     full = context.user_data.get("full", "")
-    msg = f"Thank you, {full}! I have saved your phone number: {digits} ✅\n\nYou will not need to type it again.\n\nNow, how can we help you today? You can type, send a voice note, or send a picture of your wound."
+    msg = f"Thank you, {full}! I have saved your phone number: {digits} ✅\n\nNow tell me, how are you feeling today? What is wrong? You can type, send a voice note, or send a picture. I'm listening."
     await update.message.reply_text(msg, reply_markup=main_menu())
     return ConversationHandler.END
 
@@ -257,7 +257,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("phone"):
         await update.message.reply_text("Welcome! Before we continue, what is your name please?")
         return NAME
-    await update.message.reply_text(f"Thank you, {full}. I have received your voice note. I am sending it to the doctor now. Please wait a little 🙏")
+    await update.message.reply_text(f"Thank you, {full}, I heard your voice note 🙏 I have sent it to the doctor now.\n\nHow are you feeling now? Are you in pain? Can you tell me more about what you are feeling? I'm listening, you can send another voice note.")
     link_text, chat_url = build_patient_chat(update)
     keyboard = build_patient_keyboard(chat_url, phone)
     caption = f"🎤 NEW VOICE NOTE FROM PATIENT\n\nName: {full}\nUsername: {username_text}\nPatient: {link_text}\nPhone: {phone}\nUser ID: {user_id}\n\nTap CHAT PATIENT NOW below to reply directly"
@@ -278,7 +278,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("phone"):
         await update.message.reply_text("Welcome! Before we continue, what is your name please?")
         return NAME
-    await update.message.reply_text(f"Thank you, {full}. I have received your picture. I am sending it to the hospital and doctor now. 📸")
+    await update.message.reply_text(f"Thank you, {full}, I have seen your picture 📸 I have sent it to the doctor now.\n\nHow are you feeling now? Is the pain getting worse? When did it start? Please tell me more, I'm here to help you.")
     caption_text = update.message.caption or "No description"
     link_text, chat_url = build_patient_chat(update)
     keyboard = build_patient_keyboard(chat_url, phone)
@@ -304,7 +304,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = build_patient_keyboard(chat_url, phone2)
         msg = f"💬 NEW MESSAGE FROM PATIENT\n\nName: {full2}\nUsername: {username_text}\nPatient: {link_text}\nPhone: {phone2}\nUser ID: {user_id}\nMessage: {update.message.text}\n\nTap CHAT PATIENT NOW below to reply directly"
         await send_to_hospital(context, msg, reply_markup=keyboard)
-    msg2 = f"Thank you, {full}! We have received your message. Our team will contact you soon on {phone}.\n\nSend /start to see the menu again."
+    msg2 = f"Thank you for telling me, {full} 🙏\n\nI have sent your message to the doctor already.\n\nHow are you feeling now? Is it getting better or worse?\n\nPlease tell me more - when did it start? Do you have fever, pain, or any other symptom? You can type, send a voice note, or send a picture. I'm here with you."
     await update.message.reply_text(msg2, reply_markup=main_menu())
 
 async def set_bot_commands(app):
